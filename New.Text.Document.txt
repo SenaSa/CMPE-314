@@ -1,0 +1,175 @@
+#lang plai-typed
+
+;;ExprC 
+;;S->number  S->S    S->S+ S     S->S*S   S->F  S->?
+;S›F(a,b,c)   F(x,y,z)›xyz
+;The grammar above is equivalent to the following because x, y, and z are substituted:
+;S›abc
+;Now suppose we leverage the function capability with the following grammar:
+;S›F(?)          F(x)›x a | x a F(x b)         (? means empty string)
+
+;;Defines datatype for ExprC
+(define-type ExprC
+
+[numC (n : number)]
+[plusC (lhs : ExprC) (rhs : ExprC)]
+[multC (lhs : ExprC) (rhs : ExprC)]
+[ifC (condition : ExprC)(yes : ExprC)(no : ExprC)]
+[appC (fun : symbol)(arg : ExprC)]  ; aplication, with the name of the
+                                      ; function and the argument
+[idC (s : symbol)]) ; identifier for the arguments
+
+
+;;Defines datatype for function definitions
+;;function definitions have a name, one argument, and a body
+
+(define-type FunDefC
+  [fdC (name : symbol) (arg : symbol) (body : ExprC)])
+
+
+
+;; parse s-expression -> ExprC
+;; convert a quoted s expression into the equivalent ArithC form
+;; examples
+;;  '(+ 23 (+ 23 5)))-> (plusC (numC 23)(plusC (numC 23) (numC 5))))
+;; (symbol->s-exp 'x))->  (idC 'x))
+;; '(if 1 2 3)->(ifC (numC 1) (numC 2) (numC 3)))
+
+
+(define (parse [s : s-expression]) : ExprC
+  (cond
+    [(s-exp-number? s) (numC (s-exp->number s))]
+    [(s-exp-symbol? s)  (idC (s-exp->symbol s))]
+
+  [(and (s-exp-list? s) (= (length (s-exp->list s)) 2)
+          (s-exp-symbol? (first (s-exp->list s))))
+     (appC
+      (s-exp->symbol (first (s-exp->list s)))
+      (parse (second (s-exp->list s))))]
+
+    [(s-exp-list? s)
+     (let ([sl (s-exp->list s)])
+       (case (s-exp->symbol (first sl))
+         [(+) (plusC (parse (second sl)) (parse (third sl)))]
+         [(*) (multC (parse (second sl)) (parse (third sl)))]
+         [(if) (ifC (parse (second sl)) (parse (third sl)) (parse (fourth sl)))]
+         [else (error 'parse "invalid list input")]))]
+         [else (error 'parse "invalid input")]))
+
+"Examples of Parse"
+(test (parse '(+ 3 4)) (plusC (numC 3) (numC 4)))
+(test (parse '(* 12 7)) (multC (numC 12) (numC 7)))
+
+(test (parse '(+ 23 (+ 23 5)))
+      (plusC (numC 23)
+            (plusC (numC 23) (numC 5))))
+(test (parse (symbol->s-exp 'x)) (idC 'x))
+
+(test (parse '(double 13))
+      (appC 'double (numC 13)))
+(test(parse '(if 1 2 3))(ifC (numC 1) (numC 2) (numC 3)))
+
+(test (parse '(double (+ 2 (+ 1 1))))
+(appC 'double (plusC (numC 2) (plusC (numC 1) (numC 1)))))
+
+
+;; substitution of replacing a name in an expr with another expr 
+;; what = what we want to replace the name with
+;; for = what name we want to perform substitution
+;; in = in which expression we want to do it
+
+;; subst : ExprC * symbol * ExprC -> ExprC
+(define (subst [what : ExprC] [for : symbol] [in : ExprC]) : ExprC
+  
+  (type-case ExprC in
+    [numC (n) in]
+    [idC (s) (cond
+             [(symbol=? s for) what]
+             [else in])]
+    [appC (f a) (appC f (subst what for a))]
+    [plusC (lhs rhs) (plusC (subst what for lhs)
+                      (subst what for rhs))]
+    [multC (lhs rhs) (multC (subst what for lhs)
+                      (subst what for rhs))]
+     [ifC (c s n) (error 'sust "error")]))
+
+"Test of Subst"
+(test (subst (numC 5) 'x (plusC (idC 'x) (idC 'x)))
+      (plusC (numC 5) (numC 5)))
+ 
+(test (subst (numC 5) 'x (multC (idC 'x) (idC 'x)))
+      (multC (numC 5) (numC 5)))
+
+
+;; get-fundef : symbol * (listof FunDefC) -> FunDefC
+;; a recursive helper function to find the representation of a function 
+;; definition from the list, given its name
+
+
+(define (get-fundef [n : symbol] [fds : (listof FunDefC)]) : FunDefC
+  (cond
+    [(empty? fds) (error 'get-fundef "reference to undefined function")]
+    [(cons? fds) (cond
+                   [(equal? n (fdC-name (first fds))) (first fds)]
+                   [else (get-fundef n (rest fds))])]))
+
+(define myFun(list
+ 
+  (fdC 'double 'x (plusC (idC 'x) (idC 'x))) 
+  (fdC 'inc5 'x (multC (idC 'x) (idC 'x)))))
+ (test (get-fundef 'double myFun) (fdC 'double 'x (plusC (idC 'x) (idC 'x))))
+ (test (get-fundef 'inc5 myFun) (fdC 'inc5 'x (multC (idC 'x) (idC 'x)))) 
+
+;; interp : ExprC (listof FunDefC) -> number
+
+
+
+(define (interp [e : ExprC] [fds : (listof FunDefC)]) : number
+  (type-case ExprC e
+    [numC (n) n]
+    [idC (_) (error 'interp "shouldn't get here")]
+
+    [appC (func args) (local ([define fd (get-fundef func fds)])
+              (interp (subst args
+                             (fdC-arg fd)
+                             (fdC-body fd))
+                      fds))]
+    [ifC (c s n) (cond [(<= (interp c  fds) 0) (interp s  fds)]
+                       [else (interp n  fds)])]
+    [plusC (lhs rhs) (+ (interp lhs fds) (interp rhs fds))]
+    [multC (lhs rhs) (* (interp lhs fds) (interp rhs fds))]))
+
+"Test of Interp"
+(test (interp (numC 4) (list)) 4)
+(test (interp (plusC (numC 1) (numC 2)) (list)) 3)
+(test (interp (multC (numC 5) (numC 2)) (list)) 10)
+(test (interp (appC 'double (numC 10)) (list (fdC 'double 'x (plusC (idC 'x) (idC 'x))))) 20)
+
+
+;; example list of function definitions
+(define myFunc(list
+ 
+  (fdC 'double 'x (plusC (idC 'x) (idC 'x)))  ; (define (double x) (+ x x))
+
+  (fdC 'quadruple 'x (appC 'double (appC 'double (idC 'x)))) ; (define (quadruple x) (double (double x)))
+
+  (fdC 'const5 '_ (numC 5))))  ; (define (const5 _) 5)
+ 
+
+"Test list of function definitions"
+
+(test (interp (appC 'double (numC 7))  myFunc) 14)
+
+(test (interp (appC 'quadruple (appC 'const5 (numC 1))) myFunc)20) 
+
+
+(test (interp (appC 'double (plusC (numC 3) (multC (numC 4) (numC 5)))) myFunc) 46)
+
+
+"Mix Example"
+
+(define (parse-eval [s : s-expression]) : number
+  (interp (parse s) empty))
+(test (parse-eval '(+ 5 5)) 10)
+
+(test (parse-eval '(if 3 10 (+ 2 3))) 5)
