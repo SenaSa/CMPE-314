@@ -2,11 +2,11 @@
 
 ;;ExprC 
 ;;S->number  S->S    S->S+ S     S->S*S   S->F  S->?
-;S›F(a,b,c)   F(x,y,z)›xyz
+;Sâ€ºF(a,b,c)   F(x,y,z)â€ºxyz
 ;The grammar above is equivalent to the following because x, y, and z are substituted:
-;S›abc
+;Sâ€ºabc
 ;Now suppose we leverage the function capability with the following grammar:
-;S›F(?)          F(x)›x a | x a F(x b)         (? means empty string)
+;Sâ€ºF(?)          F(x)â€ºx a | x a F(x b)         (? means empty string)
 
 ;;Defines datatype for ExprC
 (define-type ExprC
