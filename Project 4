@@ -1,0 +1,669 @@
+#lang plai-typed
+
+
+;;ExprC 
+
+;;S->number  S->symbol  S->S    S->S+ S     S->S*S   S->F  S->ε
+
+; S->( λ(list of symbol) (S))  S->(S S S)
+
+
+;S→F(a,b,c)   F(x,y,z)→xyz
+
+;The grammar above is equivalent to the following because x, y, and z are substituted:
+
+;S→abc
+
+;Now suppose we leverage the function capability with the following grammar:
+
+;S→F(ε)          F(x)→x a | x a F(x b)         (ε means empty string)
+
+
+;;Defines datatype for ExprC
+
+
+(define-type ExprS
+
+  [numS (n : number)]
+
+  [plusS (l : ExprS) (r : ExprS)]
+
+  [bminusS (l : ExprS) (r : ExprS)]
+
+  [uminusS (e : ExprS)]
+
+  [multS (l : ExprS) (r : ExprS)]
+
+  [idS (s : symbol)]
+
+  [appS (fun : symbol) (arg : ExprS)])
+
+
+
+
+
+;;Defines datatype for ExprC
+
+(define-type ExprC
+
+
+[numC (n : number)]
+
+[plusC (lhs : ExprC) (rhs : ExprC)]
+
+[multC (lhs : ExprC) (rhs : ExprC)]
+
+;[ifC (condition : ExprC)(yes : ExprC)(no : ExprC)]
+
+[appC (fun : symbol)(arg : ExprC)]  ; aplication, with the name of the
+
+                                      ; function and the argument
+
+[idC (s : symbol)]) ; identifier for the arguments
+
+
+
+;;Defines datatype for function definitions
+
+;;function definitions have a name, one argument, and a body
+
+
+(define-type FunDefC
+
+  [fdC (name : symbol) (arg : symbol) (body : ExprC)])
+
+;Define data type FMP
+
+;Extended
+
+
+(define-type FMP
+
+  [FMPnum (n : number)]
+
+  [FMPadd (lhs : FMP) (rhs : FMP)]
+
+  [FMPsub (lhs : FMP) (rhs : FMP)]
+
+  [FMPmul (lhs : FMP) (rhs : FMP)]
+
+  [FMPid (s : symbol)]
+
+  [FMPlam (params : (listof symbol)) (body : FMP)]
+
+  [FMPifzero (pred : FMP)(truestate : FMP)(falsestate : FMP)])
+
+
+
+;;parse : s-exp -> FMP
+
+;; Purpose : To parse given s-exp to abstract syntax FMP
+
+;; Template : 
+
+;(define (parse [s : s-expression]) : FMP
+
+;  (cond
+
+;    [n ...]
+
+;    [id ...]
+
+;    [add ...]
+
+;    [sub ...]
+
+;    ))
+
+
+
+
+(define (parse2 [s : s-expression]) : FMP
+
+  (cond
+
+    [(s-exp-number? s) (FMPnum (s-exp->number s))]
+
+    [(s-exp-symbol? s) (FMPid (s-exp->symbol s))]
+
+    [(s-exp-list? s)
+
+     (let ([sl (s-exp->list s)])
+
+       (cond
+
+         [(and(= (length sl) 3)
+
+          (symbol=? (s-exp->symbol (first sl)) '+))
+
+          (FMPadd (parse2 (second sl)) (parse2 (third sl)))]   
+
+         [(and(= (length sl) 3)
+
+          (symbol=? (s-exp->symbol (first sl)) '-))
+
+          (FMPsub (parse2 (second sl)) (parse2 (third sl)))]
+
+         [(and(= (length sl) 3)
+
+          (symbol=? (s-exp->symbol (first sl)) '*))
+
+          (FMPmul (parse2 (second sl)) (parse2 (third sl)))]
+
+         [(and (= (length sl) 3) 
+
+          (symbol=? (s-exp->symbol (first sl)) 'λ))
+
+          (FMPlam (map (lambda (x) (s-exp->symbol x))
+
+                       (s-exp->list(second sl)))
+
+                  (parse2 (third sl)))]
+
+         [(= (length sl) 4)
+
+          (case (s-exp->symbol (first sl))
+
+            [(ifzero) (FMPifzero 
+
+                       (parse2 (second sl))
+
+                       (parse2 (third sl))
+
+                       (parse2 (fourth sl)))]
+
+            [else (error 'parse2 "invalid keyword !")]
+
+            )]              
+
+         [else (error 'parse2 "invalid list input")])
+
+       )]
+
+    [else (error 'parse2 "invalid input")]))
+
+
+
+
+(define (parseS [s : s-expression]) : ExprS
+
+  (cond
+
+    [(s-exp-number? s) (numS (s-exp->number s))]
+
+    [(s-exp-symbol? s) (idS (s-exp->symbol s))]
+
+    [(s-exp-list? s)
+
+     (let ([sl (s-exp->list s)])
+
+       (case (s-exp->symbol (first sl))
+
+         [(+) (plusS (parseS (second sl)) (parseS (third sl)))]
+
+         [(*) (multS (parseS (second sl)) (parseS (third sl)))]
+
+         [(-) (bminusS (parseS (second sl)) (parseS (third sl)))]
+
+         [(u-) (uminusS (parseS (second sl)))]
+
+         [else (appS (s-exp->symbol (first sl))
+
+                     (parseS (second sl)))]))]
+
+    [else (error 'parseS "invalid input")]))
+
+
+
+
+(define (parsedef [s : s-expression]) : FunDefC
+
+  (cond
+
+    [(s-exp-list? s)
+
+     (let ([sl (s-exp->list s)])
+
+       (case (s-exp->symbol (first sl))
+
+         [(define) (fdC (s-exp->symbol (first (s-exp->list (second sl))))
+
+                        (s-exp->symbol (second (s-exp->list (second sl))))
+
+                        (desugar (parseS (third sl))))]
+
+         [else (error 'parsedef "invalid list")]))]
+
+    [else (error 'parsedef "invalid input")]))
+
+
+;; desugar ExprS -> ExprC
+
+;; convert new data type to old data type
+
+;; examples
+
+;; (desugar (numC 5))->(msl-num 5)
+
+
+(define (desugar [as : ExprS]) : ExprC
+
+  (type-case ExprS as
+
+    [numS (n) (numC n)]
+
+    [plusS (l r) (plusC (desugar l)
+
+                        (desugar r))]
+
+    [multS (l r) (multC (desugar l)
+
+                        (desugar r))]
+
+    [bminusS (l r) (plusC (desugar l)
+
+                          (multC (numC -1) (desugar r)))]
+
+    [uminusS (e) (multC (numC -1)
+
+                        (desugar e))]
+
+    [idS (s) (idC s)]
+
+    [appS (fun arg) (appC fun (desugar arg))]))
+
+
+(test (desugar (numS 5)) (numC 5))
+
+(test (desugar (plusS (numS 3) (numS 4)))  (plusC (numC 3)(numC 4)))
+
+
+
+;; parse s-expression -> ExprC
+
+;; convert a quoted s expression into the equivalent ArithC form
+
+;; examples
+
+;;  '(+ 23 (+ 23 5)))-> (plusC (numC 23)(plusC (numC 23) (numC 5))))
+
+;; (symbol->s-exp 'x))->  (idC 'x))
+
+;; '(if 1 2 3)->(ifC (numC 1) (numC 2) (numC 3)))
+
+
+(define (parse [s : s-expression]) : ExprC
+
+  (cond
+
+    [(s-exp-number? s) (numC (s-exp->number s))]
+
+    [(s-exp-symbol? s) (idC (s-exp->symbol s))]
+
+    [(s-exp-list? s)
+
+     (let ([sl (s-exp->list s)])
+
+       (cond
+
+       ;  [(= (length sl) 4)
+
+         ; (if (symbol=? 'if (s-exp->symbol (first sl)))
+
+          ;    (ifC (parse (second sl))
+
+                  ;     (parse (third sl))
+
+                   ;    (parse (fourth sl)))
+
+             ; (error 'parse "invalid expression as input"))]
+
+         [(= (length sl) 3)
+
+          (case (s-exp->symbol (first sl)) 
+
+                    [(+) (plusC (parse (second sl)) (parse (third sl)))]
+
+                    [(*) (multC (parse (second sl)) (parse (third sl)))])]
+
+            
+
+         [(= (length sl) 2)
+
+          (appC (s-exp->symbol (first sl)) (parse (second sl)))]
+
+         [else (error 'parse "invalid list input")])
+
+       )]
+
+    [else (error 'parse "invalid input")]))
+
+
+"Examples of Parse"
+
+(test (parse '(+ 3 4)) (plusC (numC 3) (numC 4)))
+
+(test (parse '(* 12 7)) (multC (numC 12) (numC 7)))
+
+
+(test (parse '(+ 23 (+ 23 5)))
+
+      (plusC (numC 23)
+
+            (plusC (numC 23) (numC 5))))
+
+(test (parse (symbol->s-exp 'x)) (idC 'x))
+
+
+(test (parse '(double 13))
+
+      (appC 'double (numC 13)))
+
+;(test(parse '(if 1 2 3))(ifC (numC 1) (numC 2) (numC 3)))
+
+
+(test (parse '(double (+ 2 (+ 1 1))))
+
+(appC 'double (plusC (numC 2) (plusC (numC 1) (numC 1)))))
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;Binding
+
+;this function takes symbol as name and value which is number
+
+;to bind any funciton
+
+
+(define-type Binding [bind (name : symbol) (val : number)])
+
+
+;; An alias to work easily on Environment.
+
+(define-type-alias Environment (listof Binding))
+
+
+;; Empty environment.
+
+(define mt-env empty)
+
+
+;; Extending environment
+
+(define extend-env cons)
+
+
+
+;;lookup function takes n as a symbol and environment which includes binding values,
+
+;; then it checks wheter this funciton in environment or not?
+
+;;if there is,it produces value otherwise it gives error
+
+
+(define (lookup [for : symbol] [env : Environment]) : number
+
+  (cond
+
+    [(empty? env) (error 'lookup "name not found")]
+
+    [else (cond
+
+            [(symbol=? for (bind-name (first env)))
+
+             (bind-val (first env))]
+
+            [else (lookup for (rest env))])]))
+
+
+
+;; substitution of replacing a name in an expr with another expr 
+
+;; what = what we want to replace the name with
+
+;; for = what name we want to perform substitution
+
+;; in = in which expression we want to do it
+
+
+;; subst : ExprC * symbol * ExprC -> ExprC
+
+(define (subst [what : ExprC] [for : symbol] [in : ExprC]) : ExprC
+
+  
+
+  (type-case ExprC in
+
+    [numC (n) in]
+
+    [idC (s) (cond
+
+             [(symbol=? s for) what]
+
+             [else in])]
+
+    [appC (f a) (appC f (subst what for a))]
+
+    [plusC (lhs rhs) (plusC (subst what for lhs)
+
+                      (subst what for rhs))]
+
+    [multC (lhs rhs) (multC (subst what for lhs)
+
+                      (subst what for rhs))]))
+
+    ; [ifC (c s n) (error 'sust "error")]
+
+
+"Test of Subst"
+
+(test (subst (numC 5) 'x (plusC (idC 'x) (idC 'x)))
+
+      (plusC (numC 5) (numC 5)))
+
+ 
+
+(test (subst (numC 5) 'x (multC (idC 'x) (idC 'x)))
+
+      (multC (numC 5) (numC 5)))
+
+
+
+;; get-fundef : symbol * (listof FunDefC) -> FunDefC
+
+;; a recursive helper function to find the representation of a function 
+
+;; definition from the list, given its name
+
+
+
+(define (get-fundef [n : symbol] [fds : (listof FunDefC)]) : FunDefC
+
+  (cond
+
+    [(empty? fds) (error 'get-fundef "reference to undefined function")]
+
+    [(cons? fds) (cond
+
+                   [(equal? n (fdC-name (first fds))) (first fds)]
+
+                   [else (get-fundef n (rest fds))])]))
+
+
+
+
+;; interp : ExprC (listof FunDefC) -> number
+
+
+
+;; Interpreter 
+
+;; Purpose : To interpreter given ExprC to number
+
+;; Template : 
+
+;(define (interp [expr : ExprC] [env : Environment][fds : (listof FunDefC)]) : number
+
+;  (type-case
+
+;    [n ...]
+
+;    [id ...]
+
+;     [app..]
+
+;    [plusC..]
+
+;     [multC..]
+
+
+
+
+
+
+(define (interp [expr : ExprC] [env : Environment] [fds : (listof FunDefC)]) : number
+
+  (type-case ExprC expr
+
+    [numC (n) n]
+
+    [idC (n) (lookup n env)]
+
+    [appC (f a) (local ([define fd (get-fundef f fds)])
+
+                  (interp (fdC-body fd)
+
+                          (extend-env (bind (fdC-arg fd)
+
+                                            (interp a env fds))
+
+                                      mt-env)
+
+                          fds))]
+
+    [plusC (l r) (+ (interp l env fds) (interp r env fds))]
+
+    [multC (l r) (* (interp l env fds) (interp r env fds))]))
+
+
+  ;[ifC (pred t f)
+
+          ;  (if (= 0 (numC-n (interp pred env)))
+
+           ;  (interp t env)   (interp f env))]
+
+
+
+
+"TEST of Interp"
+
+(test (interp (plusC (numC 10) (appC 'const5 (numC 10)))
+
+              mt-env
+
+              (list (fdC 'const5 '_ (numC 5))))
+
+      15)
+
+
+(test (interp (plusC (numC 10) (appC 'double (plusC (numC 1) (numC 2))))
+
+              mt-env
+
+              (list (fdC 'double 'x (plusC (idC 'x) (idC 'x)))))
+
+      16)
+
+
+(test (interp (plusC (numC 10) (appC 'quadruple (plusC (numC 1) (numC 2))))
+
+              mt-env
+
+              (list (fdC 'quadruple 'x (appC 'double (appC 'double (idC 'x))))
+
+                    (fdC 'double 'x (plusC (idC 'x) (idC 'x)))))
+
+      22)
+
+
+(test (interp (multC (numC 10 ) (appC 'quadruple (plusC (numC 1) (numC 2))))
+
+              mt-env
+
+              (list (fdC 'quadruple 'x (appC 'double (appC 'double (idC 'x))))
+
+                    (fdC 'double 'x (plusC (idC 'x) (idC 'x)))))
+
+      44)
+
+
+(test (interp (multC (numC 10 ) (appC 'double (plusC (numC 1) (numC 2))))
+
+              mt-env
+
+              (list (fdC 'quadruple 'x (appC 'double (appC 'double (idC 'x))))
+
+                    (fdC 'double 'x (plusC (idC 'x) (idC 'x)))))
+
+      60)
+
+
+
+
+
+
+
+
+;; example list of function definitions
+
+(define myFunc(list
+
+ 
+
+  (fdC 'double 'x (parse '(+ x x)))  ; (define (double x) (+ x x))
+
+
+  (fdC 'quadruple 'x (appC 'double (appC 'double (idC 'x)))) ; (define (quadruple x) (double (double x)))
+
+
+  (fdC 'const5 '_ (parse (number->s-exp 5)))  ; (define (const5 _) 5)
+
+  (fdC 'sqr 'x (parse '(* x x)))
+
+  (fdC 'sub1 'x (parse '(+ x -1)))))
+
+   ;(fdC 'factorial 'n (parse 
+
+       ;                '(ifzero n 1
+
+        ;                        (* n (factorial (sub1 n))))))
+
+
+  
+
+
+
+
+
+(define myFun(list
+
+ 
+
+  (fdC 'double 'x (plusC (idC 'x) (idC 'x))) 
+
+  (fdC 'inc5 'x (multC (idC 'x) (idC 'x)))))
+
+ (test (get-fundef 'double myFun) (fdC 'double 'x (plusC (idC 'x) (idC 'x))))
+
+ (test (get-fundef 'inc5 myFun) (fdC 'inc5 'x (multC (idC 'x) (idC 'x)))) 
+
+
+
+
+
+
+
+                    
